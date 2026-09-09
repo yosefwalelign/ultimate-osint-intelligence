@@ -1,0 +1,229 @@
+# Ultimate OSINT Intelligence Platform Configuration
+
+# General Settings
+app:
+  name: "Ultimate OSINT Intelligence Platform"
+  version: "1.0.0"
+  environment: "production"
+  debug: false
+
+# Web UI Configuration
+web:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  secret_key: "change_this_in_production"
+  session_timeout: 3600
+  max_upload_size: 52428800  # 50MB
+
+# API Configuration
+api:
+  enabled: true
+  port: 8000
+  version: "v1"
+  rate_limit: 100
+  rate_limit_window: 60
+  auth_required: false
+  cors_origins:
+    - "*"
+
+# Database Configuration
+database:
+  type: "postgresql"
+  host: "localhost"
+  port: 5432
+  username: "osint"
+  password: "osint"
+  database: "osint"
+  pool_size: 20
+  max_overflow: 40
+  pool_recycle: 3600
+
+# Redis Configuration
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: null
+  ssl: false
+  cache_ttl: 86400  # 24 hours
+
+# OSINT Scan Configuration
+osint:
+  max_workers: 50
+  timeout: 30
+  retry_attempts: 3
+  retry_delay: 5
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  
+  # Module Settings
+  modules:
+    username_scan:
+      enabled: true
+      sites: 700  # Number of sites to check
+    
+    email_scan:
+      enabled: true
+      sites: 175  # Number of sites to check
+    
+    instagram:
+      enabled: true
+      download_media: true
+      max_photos: 1000
+    
+    google:
+      enabled: true
+      check_drive: true
+      check_gaia: true
+    
+    darkweb:
+      enabled: true
+      tor_proxy: "socks5://127.0.0.1:9050"
+      use_tor: true
+    
+    github:
+      enabled: true
+      analyze_commits: true
+      analyze_activity: true
+    
+    twitter:
+      enabled: true
+      analyze_timeline: true
+    
+    telegram:
+      enabled: false  # Requires special setup
+    
+    breach_intel:
+      enabled: true
+      hudson_rock: false  # Requires API key
+
+# Proxy Configuration
+proxy:
+  enabled: false
+  type: "http"  # http, socks5, socks4
+  list_file: "/app/proxies.txt"
+  rotate: true
+  validate: true
+  timeout: 10
+  max_retries: 3
+
+# TOR Configuration
+tor:
+  enabled: false
+  socks_port: 9050
+  control_port: 9051
+  password: null
+  exit_ip_refresh: 300  # seconds
+
+# Export Configuration
+export:
+  formats:
+    - "json"
+    - "csv"
+    - "pdf"
+    - "html"
+  include_media: true
+  media_quality: "high"  # low, medium, high
+  compress_pdf: true
+  retention_days: 30
+  auto_cleanup: true
+
+# Activity Analysis Configuration
+activity_analysis:
+  enabled: true
+  analyze_github: true
+  analyze_twitter: true
+  analyze_telegram: false
+  analyze_instagram: true
+  timezone_detection: true
+  active_hours_detection: true
+  posting_pattern_analysis: true
+  min_data_points: 10  # Minimum posts/commits to analyze
+
+# Media Gallery Configuration
+media:
+  enabled: true
+  download_dir: "/app/downloads"
+  max_size: 10737418240  # 10GB
+  cleanup_days: 90
+  image_processing: true
+  generate_thumbnails: true
+  extract_metadata: true
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/osint.log"
+  max_size: 10485760  # 10MB
+  backup_count: 10
+  console: true
+
+# Security Configuration
+security:
+  ssl_enabled: false
+  ssl_cert: "/app/certs/cert.pem"
+  ssl_key: "/app/certs/key.pem"
+  api_key_required: false
+  api_keys: []
+  ip_whitelist: []
+  rate_limit: true
+
+# Notification Configuration
+notifications:
+  enabled: false
+  email: false
+  webhook: false
+  telegram: false
+  slack: false
+
+# AI/LLM Integration
+ai:
+  enabled: false
+  default_model: "gpt-3.5-turbo"
+  models:
+    openai:
+      api_key: null
+      models: ["gpt-3.5-turbo", "gpt-4"]
+    
+    claude:
+      api_key: null
+      models: ["claude-3-opus", "claude-3-sonnet"]
+    
+    ollama:
+      enabled: false
+      base_url: "http://127.0.0.1:11434"
+      model: "llama2"
+  
+  features:
+    profile_analysis: true
+    behavior_prediction: true
+    threat_assessment: true
+
+# Performance Configuration
+performance:
+  cache_enabled: true
+  cache_ttl: 86400
+  batch_size: 100
+  queue_workers: 4
+  async_enabled: true
+  compression: true
+
+# Maintenance
+maintenance:
+  auto_cleanup: true
+  cleanup_interval: 86400  # 24 hours
+  database_vacuum: true
+  log_rotation: true
+  cache_clear_interval: 604800  # 7 days
+
+# Feature Flags
+features:
+  enable_web_ui: true
+  enable_cli: true
+  enable_api: true
+  enable_batch_processing: true
+  enable_scheduling: false
+  enable_webhooks: false
+  enable_multi_user: false
+  enable_advanced_analytics: false
