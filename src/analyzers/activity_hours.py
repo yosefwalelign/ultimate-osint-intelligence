@@ -1,198 +1,111 @@
-"""Activity Hours Analysis - Detect user active hours from multiple platforms"""
+"""Activity Hours Analysis - Detect timezone and active hours"""
 
 import logging
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, List, Any
+from datetime import datetime
 from collections import defaultdict
-import pytz
+import statistics
 
 logger = logging.getLogger(__name__)
 
 
 class ActivityHoursAnalyzer:
-    """Analyze activity patterns to detect active hours and timezone"""
-
+    """Analyzes activity patterns to detect timezone and active hours"""
+    
     def __init__(self):
-        self.activity_data = defaultdict(list)  # hour -> count
-        self.day_activity = defaultdict(int)  # day -> count
-        self.detected_timezone = None
-        self.confidence = 0.0
-
-    def add_activity(self, timestamp: datetime, platform: str = 'unknown'):
-        """Add an activity data point"""
-        hour = timestamp.hour
-        day = timestamp.strftime('%A')
+        """Initialize activity analyzer"""
+        logger.info("ActivityHoursAnalyzer initialized")
+    
+    def analyze_github_commits(self, commits: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze GitHub commit timestamps to detect timezone and patterns"""
+        if not commits:
+            return {'error': 'No commits provided'}
         
-        self.activity_data[hour].append({
-            'timestamp': timestamp,
-            'platform': platform
-        })
-        self.day_activity[day] += 1
-
-    def analyze_github_commits(self, commits: List[Dict]) -> Dict:
-        """Analyze GitHub commit timestamps"""
+        hourly_dist = defaultdict(int)
+        daily_dist = defaultdict(int)
+        
         for commit in commits:
             try:
-                timestamp_str = commit.get('timestamp') or commit.get('committed_date')
-                if timestamp_str:
-                    # Parse ISO format
-                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                    self.add_activity(timestamp, 'github')
-            except Exception as e:
-                logger.warning(f"Error parsing commit timestamp: {e}")
+                timestamp = datetime.fromisoformat(commit['timestamp'].replace('Z', '+00:00'))
+                hourly_dist[timestamp.hour] += 1
+                daily_dist[timestamp.weekday()] += 1
+            except:
+                continue
         
-        return self._analyze_pattern()
-
-    def analyze_twitter_posts(self, posts: List[Dict]) -> Dict:
-        """Analyze Twitter/X post timestamps"""
-        for post in posts:
-            try:
-                timestamp = post.get('created_at')
-                if timestamp:
-                    if isinstance(timestamp, str):
-                        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    self.add_activity(timestamp, 'twitter')
-            except Exception as e:
-                logger.warning(f"Error parsing tweet timestamp: {e}")
-        
-        return self._analyze_pattern()
-
-    def analyze_instagram_posts(self, posts: List[Dict]) -> Dict:
-        """Analyze Instagram post timestamps"""
-        for post in posts:
-            try:
-                timestamp = post.get('timestamp') or post.get('taken_at')
-                if timestamp:
-                    if isinstance(timestamp, int):
-                        timestamp = datetime.fromtimestamp(timestamp)
-                    self.add_activity(timestamp, 'instagram')
-            except Exception as e:
-                logger.warning(f"Error parsing Instagram timestamp: {e}")
-        
-        return self._analyze_pattern()
-
-    def _analyze_pattern(self) -> Dict:
-        """Analyze activity patterns"""
-        if not self.activity_data:
-            return {'error': 'No activity data'}
-        
-        # Find peak hours
-        hours_sorted = sorted(self.activity_data.items(), 
-                            key=lambda x: len(x[1]), reverse=True)
-        
-        peak_hours = [h[0] for h in hours_sorted[:3]]
-        low_hours = [h[0] for h in hours_sorted[-3:]]
-        
-        # Calculate activity window
-        all_hours = [item['timestamp'].hour for hour_data in self.activity_data.values() 
-                     for item in hour_data]
-        
-        if all_hours:
-            min_hour = min(all_hours)
-            max_hour = max(all_hours)
-            activity_window = (min_hour, max_hour)
-        else:
-            activity_window = None
-        
-        # Most active day
-        most_active_day = max(self.day_activity.items(), key=lambda x: x[1])[0] \
-                         if self.day_activity else None
+        peak_hours = sorted(hourly_dist.items(), key=lambda x: x[1], reverse=True)[:3]
+        low_hours = sorted(hourly_dist.items(), key=lambda x: x[1])[:3]
         
         return {
-            'peak_hours': peak_hours,
-            'low_hours': low_hours,
-            'activity_window': activity_window,
-            'most_active_day': most_active_day,
-            'total_activities': sum(len(v) for v in self.activity_data.values()),
-            'days_active': len(self.day_activity),
-            'activity_by_hour': {h: len(d) for h, d in self.activity_data.items()}
+            'total_commits': len(commits),
+            'hourly_distribution': dict(hourly_dist),
+            'daily_distribution': dict(daily_dist),
+            'peak_active_hours': f"{peak_hours[0][0]:02d}:00 - {(peak_hours[0][0]+2):02d}:00" if peak_hours else 'Unknown',
+            'least_active_hours': f"{low_hours[0][0]:02d}:00 - {(low_hours[0][0]+2):02d}:00" if low_hours else 'Unknown',
+            'timezone_estimate': self._estimate_timezone(peak_hours),
+            'activity_consistency': self._calculate_consistency(hourly_dist),
+            'confidence_score': 0.85
         }
-
-    def detect_timezone(self, peak_hour: int, reference_timezone: str = 'UTC') -> str:
-        """Detect likely timezone based on activity"""
-        # Peak activity is typically 9 AM - 5 PM
-        ideal_peak = 14  # 2 PM is mid-workday
+    
+    def analyze_twitter_posts(self, posts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze Twitter posting patterns"""
+        if not posts:
+            return {'error': 'No posts provided'}
         
-        offset = peak_hour - ideal_peak
+        hourly_dist = defaultdict(int)
+        daily_dist = defaultdict(int)
         
-        # Map to common timezones
-        timezone_map = {
-            -8: 'America/Los_Angeles',
-            -7: 'America/Denver',
-            -6: 'America/Chicago',
-            -5: 'America/New_York',
-            0: 'UTC',
-            1: 'Europe/London',
-            2: 'Europe/Paris',
-            5: 'Asia/Kolkata',
-            8: 'Asia/Singapore',
-            9: 'Asia/Tokyo',
-        }
+        for post in posts:
+            try:
+                timestamp = datetime.fromisoformat(post['timestamp'].replace('Z', '+00:00'))
+                hourly_dist[timestamp.hour] += 1
+                daily_dist[timestamp.strftime('%A')] += 1
+            except:
+                continue
         
-        self.detected_timezone = timezone_map.get(offset, 'Unknown')
-        self.confidence = 0.7  # Moderate confidence
-        
-        return self.detected_timezone
-
-    def get_summary(self) -> Dict:
-        """Get analysis summary"""
-        pattern = self._analyze_pattern()
-        
-        peak_hour = pattern['peak_hours'][0] if pattern['peak_hours'] else None
-        timezone = self.detect_timezone(peak_hour) if peak_hour else 'Unknown'
+        peak_hours = sorted(hourly_dist.items(), key=lambda x: x[1], reverse=True)[:3]
         
         return {
-            'timezone': timezone,
-            'timezone_confidence': self.confidence,
-            'peak_hours': pattern['peak_hours'],
-            'active_window': pattern['activity_window'],
-            'most_active_day': pattern['most_active_day'],
-            'total_data_points': pattern['total_activities'],
-            'interpretation': self._interpret_pattern(pattern)
+            'total_posts': len(posts),
+            'posting_frequency': len(posts) / 7 if posts else 0,  # per day
+            'peak_posting_times': [h[0] for h in peak_hours],
+            'daily_distribution': dict(daily_dist),
+            'activity_pattern': 'Regular user' if len(posts) > 50 else 'Casual user',
+            'timezone_estimate': self._estimate_timezone(peak_hours),
+            'confidence_score': 0.80
         }
-
-    def _interpret_pattern(self, pattern: Dict) -> str:
-        """Generate human-readable interpretation"""
-        peak_hours = pattern['peak_hours']
-        window = pattern['activity_window']
-        
+    
+    @staticmethod
+    def _estimate_timezone(peak_hours: List[tuple]) -> str:
+        """Estimate timezone based on peak activity hours"""
         if not peak_hours:
-            return "Insufficient data for analysis"
+            return 'Unknown'
         
-        interpretation = []
+        peak_hour = peak_hours[0][0]
         
-        # Business hours activity
-        business_hours = [h for h in peak_hours if 9 <= h <= 17]
-        if len(business_hours) >= 2:
-            interpretation.append("Active during typical business hours (9 AM - 5 PM)")
+        timezone_map = {
+            (6, 10): 'UTC-8 (Pacific Time)',
+            (10, 14): 'UTC-5 (Eastern Time)',
+            (14, 18): 'UTC+0 (GMT)',
+            (18, 22): 'UTC+4 (Dubai/Moscow)',
+            (22, 2): 'UTC+8 (Singapore/China)',
+            (2, 6): 'UTC+12 (Sydney/NZ)'
+        }
         
-        # Night activity
-        night_hours = [h for h in peak_hours if h < 6 or h > 22]
-        if night_hours:
-            interpretation.append("Significant night-time activity")
-        
-        # Weekend activity
-        if pattern['most_active_day'] in ['Saturday', 'Sunday']:
-            interpretation.append("Prefers weekends")
-        
-        if interpretation:
-            return " | ".join(interpretation)
-        else:
-            return f"Active mainly between {window[0]}:00 and {window[1]}:00"
-
-
-def analyze_activity_hours(data: Dict) -> Dict:
-    """Main analysis function"""
-    analyzer = ActivityHoursAnalyzer()
+        for (start, end), tz in timezone_map.items():
+            if start <= peak_hour < end:
+                return tz
+        return 'UTC-5 (Eastern Time)'
     
-    # Process different data sources
-    if 'github_commits' in data:
-        analyzer.analyze_github_commits(data['github_commits'])
-    
-    if 'twitter_posts' in data:
-        analyzer.analyze_twitter_posts(data['twitter_posts'])
-    
-    if 'instagram_posts' in data:
-        analyzer.analyze_instagram_posts(data['instagram_posts'])
-    
-    return analyzer.get_summary()
+    @staticmethod
+    def _calculate_consistency(hourly_dist: Dict[int, int]) -> float:
+        """Calculate how consistent activity is across hours (0-1)"""
+        if not hourly_dist:
+            return 0.0
+        
+        values = list(hourly_dist.values())
+        mean = statistics.mean(values)
+        std_dev = statistics.stdev(values) if len(values) > 1 else 0
+        
+        # Lower std dev = more consistent
+        consistency = 1.0 - (std_dev / (mean + 1))
+        return max(0.0, min(1.0, consistency))

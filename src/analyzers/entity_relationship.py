@@ -1,319 +1,164 @@
-"""Entity Relationship Graph - GOD-LEVEL Feature #1"""
+"""Entity Relationship Graph Builder - Link identities across platforms"""
 
 import logging
-from typing import Dict, List, Set, Tuple, Optional
-from dataclasses import dataclass, field
+from typing import Dict, List, Any, Set
 from datetime import datetime
-import json
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Entity:
-    """Represents an entity (person, email, username, etc)"""
-    id: str
-    name: str
-    entity_type: str  # 'person', 'email', 'username', 'domain', 'phone', 'ip'
-    data: Dict = field(default_factory=dict)
-    confidence: float = 1.0
-    sources: List[str] = field(default_factory=list)
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'type': self.entity_type,
-            'data': self.data,
-            'confidence': self.confidence,
-            'sources': self.sources
-        }
-
-
-@dataclass
-class Relationship:
-    """Represents a relationship between entities"""
-    source_id: str
-    target_id: str
-    relationship_type: str  # 'same_person', 'knows', 'works_for', 'manages', etc
-    strength: float  # 0-1 confidence
-    evidence: List[str] = field(default_factory=list)
-    first_seen: datetime = field(default_factory=datetime.now)
-    last_seen: datetime = field(default_factory=datetime.now)
-    
-    def to_dict(self):
-        return {
-            'source': self.source_id,
-            'target': self.target_id,
-            'type': self.relationship_type,
-            'strength': self.strength,
-            'evidence': self.evidence,
-            'first_seen': self.first_seen.isoformat(),
-            'last_seen': self.last_seen.isoformat()
-        }
-
-
 class EntityRelationshipGraph:
-    """Build and analyze entity relationships"""
-
+    """Builds and visualizes entity relationships"""
+    
     def __init__(self):
-        self.entities: Dict[str, Entity] = {}
-        self.relationships: Dict[str, List[Relationship]] = {}
-        self.similarity_threshold = 0.7
-
-    def add_entity(self, entity: Entity) -> None:
+        """Initialize entity graph"""
+        self.nodes = {}  # Entity ID -> Entity data
+        self.edges = []  # Connections between entities
+        logger.info("EntityRelationshipGraph initialized")
+    
+    def add_entity(self, entity_id: str, entity_type: str, attributes: Dict[str, Any]):
         """Add entity to graph"""
-        if entity.id not in self.entities:
-            self.entities[entity.id] = entity
-            self.relationships[entity.id] = []
-        else:
-            # Merge with existing
-            existing = self.entities[entity.id]
-            existing.data.update(entity.data)
-            existing.sources.extend(entity.sources)
-            existing.sources = list(set(existing.sources))
-
-    def add_relationship(self, source_id: str, target_id: str,
-                        relationship_type: str, strength: float,
-                        evidence: List[str] = None) -> None:
+        self.nodes[entity_id] = {
+            'id': entity_id,
+            'type': entity_type,
+            'attributes': attributes,
+            'discovered_on': datetime.now().isoformat()
+        }
+    
+    def add_edge(self, source_id: str, target_id: str, relationship_type: str, strength: float = 0.8):
         """Add relationship between entities"""
-        rel = Relationship(
-            source_id=source_id,
-            target_id=target_id,
-            relationship_type=relationship_type,
-            strength=strength,
-            evidence=evidence or []
-        )
+        self.edges.append({
+            'source': source_id,
+            'target': target_id,
+            'type': relationship_type,
+            'strength': strength  # 0-1 confidence
+        })
+    
+    def build_from_results(self, results: List[Dict[str, Any]]) -> 'EntityRelationshipGraph':
+        """Build graph from scan results"""
+        entities_seen = set()
         
-        if source_id not in self.relationships:
-            self.relationships[source_id] = []
-        
-        self.relationships[source_id].append(rel)
-
-    def link_identities(self, entity_id1: str, entity_id2: str,
-                       similarity_score: float) -> None:
-        """Link multiple identities of same person"""
-        if similarity_score >= self.similarity_threshold:
-            self.add_relationship(
-                entity_id1, entity_id2,
-                'same_person',
-                similarity_score,
-                evidence=['OSINT correlation']
-            )
-
-    def find_connected_entities(self, entity_id: str, depth: int = 2) -> Dict:
-        """Find all entities connected to target"""
-        visited = set()
-        connections = {}
-        
-        def traverse(current_id: str, current_depth: int):
-            if current_depth == 0 or current_id in visited:
-                return
+        for result in results:
+            target = result.get('target')
+            module = result.get('module')
+            data = result.get('data', {})
             
-            visited.add(current_id)
+            # Add target entity if not seen
+            if target not in entities_seen:
+                self.add_entity(target, 'target', {'target_type': result.get('target_type')})
+                entities_seen.add(target)
             
-            if current_id in self.relationships:
-                for rel in self.relationships[current_id]:
-                    if rel.target_id not in visited:
-                        if rel.target_id not in connections:
-                            connections[rel.target_id] = []
-                        
-                        connections[rel.target_id].append({
-                            'relationship': rel.relationship_type,
-                            'strength': rel.strength,
-                            'depth': depth - current_depth + 1
-                        })
-                        
-                        traverse(rel.target_id, current_depth - 1)
+            # Add platform/result entity
+            if result.get('found'):
+                platform_id = f"{target}_{module}"
+                if platform_id not in entities_seen:
+                    self.add_entity(platform_id, 'platform_account', data)
+                    # Link target to platform
+                    self.add_edge(target, platform_id, 'has_account', result.get('confidence', 0.8))
+                    entities_seen.add(platform_id)
+            
+            # Extract and link related entities from data
+            related = self._extract_related_entities(data)
+            for rel_id, rel_type in related:
+                if rel_id not in entities_seen and rel_id:  # Skip empty
+                    self.add_entity(rel_id, rel_type, {})
+                    self.add_edge(target, rel_id, 'linked_to', 0.75)
+                    entities_seen.add(rel_id)
         
-        traverse(entity_id, depth)
-        return connections
-
-    def detect_clusters(self) -> List[Set[str]]:
-        """Detect entity clusters (groups of connected entities)"""
+        logger.info(f"Built graph with {len(self.nodes)} entities and {len(self.edges)} relationships")
+        return self
+    
+    def get_graph_visualization_data(self) -> Dict[str, Any]:
+        """Get graph data formatted for visualization libraries (D3.js, Cytoscape, etc.)"""
+        return {
+            'nodes': list(self.nodes.values()),
+            'edges': self.edges,
+            'stats': {
+                'node_count': len(self.nodes),
+                'edge_count': len(self.edges),
+                'density': self._calculate_density()
+            }
+        }
+    
+    def export_as_graphml(self) -> str:
+        """Export graph as GraphML for use with Gephi/Cytoscape"""
+        graphml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        graphml += '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">\n'
+        graphml += '  <graph edgedefault="directed">\n'
+        
+        # Add nodes
+        for node_id, node_data in self.nodes.items():
+            graphml += f'    <node id="{node_id}" label="{node_data["attributes"].get("label", node_id)}"/>\n'
+        
+        # Add edges
+        for i, edge in enumerate(self.edges):
+            graphml += f'    <edge id="e{i}" source="{edge["source"]}" target="{edge["target"]}" label="{edge["type"]}"/>\n'
+        
+        graphml += '  </graph>\n'
+        graphml += '</graphml>'
+        
+        return graphml
+    
+    def find_clusters(self) -> List[Set[str]]:
+        """Find clusters/communities of related entities"""
+        # Simple connected components algorithm
         visited = set()
         clusters = []
         
-        def dfs(entity_id: str, cluster: Set[str]):
-            if entity_id in visited:
+        def dfs(node_id: str, cluster: Set[str]):
+            if node_id in visited:
                 return
+            visited.add(node_id)
+            cluster.add(node_id)
             
-            visited.add(entity_id)
-            cluster.add(entity_id)
-            
-            if entity_id in self.relationships:
-                for rel in self.relationships[entity_id]:
-                    if rel.target_id not in visited:
-                        dfs(rel.target_id, cluster)
+            # Follow outgoing edges
+            for edge in self.edges:
+                if edge['source'] == node_id and edge['target'] not in visited:
+                    dfs(edge['target'], cluster)
+                elif edge['target'] == node_id and edge['source'] not in visited:
+                    dfs(edge['source'], cluster)
         
-        for entity_id in self.entities:
-            if entity_id not in visited:
+        for node_id in self.nodes:
+            if node_id not in visited:
                 cluster = set()
-                dfs(entity_id, cluster)
-                if cluster:
-                    clusters.append(cluster)
+                dfs(node_id, cluster)
+                clusters.append(cluster)
         
         return clusters
-
-    def identify_pivots(self, entity_id: str) -> List[Tuple[str, float]]:
-        """Identify pivot points for further investigation"""
-        pivots = []
+    
+    @staticmethod
+    def _extract_related_entities(data: Dict[str, Any]) -> List[tuple]:
+        """Extract related entity IDs from data"""
+        related = []
         
-        if entity_id in self.relationships:
-            for rel in self.relationships[entity_id]:
-                target_entity = self.entities.get(rel.target_id)
-                if target_entity:
-                    # Pivots are highly connected entities
-                    connection_count = len(self.relationships.get(rel.target_id, []))
-                    pivot_score = connection_count * rel.strength
-                    pivots.append((rel.target_id, pivot_score))
+        # Extract email if present
+        if 'email' in data and data['email']:
+            related.append((data['email'], 'email'))
         
-        return sorted(pivots, key=lambda x: x[1], reverse=True)
-
-    def calculate_degrees_of_separation(self, source_id: str, target_id: str) -> int:
-        """Calculate degrees of separation between entities"""
-        from collections import deque
+        # Extract linked accounts
+        if 'linked_accounts' in data:
+            for account in data.get('linked_accounts', []):
+                related.append((account, 'account'))
         
-        queue = deque([(source_id, 0)])
-        visited = {source_id}
+        # Extract company if present
+        if 'company' in data and data['company']:
+            related.append((data['company'], 'company'))
         
-        while queue:
-            current_id, distance = queue.popleft()
-            
-            if current_id == target_id:
-                return distance
-            
-            if current_id in self.relationships:
-                for rel in self.relationships[current_id]:
-                    if rel.target_id not in visited:
-                        visited.add(rel.target_id)
-                        queue.append((rel.target_id, distance + 1))
+        # Extract website if present
+        if 'website' in data and data['website']:
+            related.append((data['website'], 'website'))
         
-        return -1  # Not connected
-
-    def get_graph_visualization_data(self) -> Dict:
-        """Get data formatted for visualization (Cytoscape.js, D3.js)"""
-        nodes = [
-            {
-                'data': {
-                    'id': entity.id,
-                    'label': entity.name,
-                    'type': entity.entity_type,
-                    'confidence': entity.confidence
-                }
-            }
-            for entity in self.entities.values()
-        ]
-        
-        edges = []
-        for source_id, rels in self.relationships.items():
-            for rel in rels:
-                edges.append({
-                    'data': {
-                        'id': f"{source_id}_{rel.target_id}",
-                        'source': source_id,
-                        'target': rel.target_id,
-                        'label': rel.relationship_type,
-                        'weight': rel.strength
-                    }
-                })
-        
-        return {
-            'nodes': nodes,
-            'edges': edges,
-            'metadata': {
-                'total_entities': len(self.entities),
-                'total_relationships': sum(len(rels) for rels in self.relationships.values()),
-                'clusters': len(self.detect_clusters())
-            }
-        }
-
-    def export_as_json(self) -> str:
-        """Export graph as JSON"""
-        graph_data = {
-            'entities': {eid: e.to_dict() for eid, e in self.entities.items()},
-            'relationships': {
-                sid: [r.to_dict() for r in rels]
-                for sid, rels in self.relationships.items()
-            },
-            'metadata': {
-                'total_entities': len(self.entities),
-                'total_relationships': sum(len(rels) for rels in self.relationships.values()),
-                'clusters': len(self.detect_clusters())
-            }
-        }
-        return json.dumps(graph_data, indent=2, default=str)
-
-    def export_as_graphml(self) -> str:
-        """Export as GraphML for Gephi/Cytoscape"""
-        # GraphML format for network analysis tools
-        graphml = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        graphml += '<graphml xmlns="http://graphml.graphdrawing.org/xmlformat/graphml.xml">\n'
-        graphml += '<graph edgedefault="directed">\n'
-        
-        # Nodes
-        for entity in self.entities.values():
-            graphml += f'  <node id="{entity.id}" label="{entity.name}">\n'
-            graphml += f'    <data key="type">{entity.entity_type}</data>\n'
-            graphml += f'    <data key="confidence">{entity.confidence}</data>\n'
-            graphml += '  </node>\n'
-        
-        # Edges
-        for source_id, rels in self.relationships.items():
-            for rel in rels:
-                graphml += f'  <edge source="{source_id}" target="{rel.target_id}" label="{rel.relationship_type}">\n'
-                graphml += f'    <data key="strength">{rel.strength}</data>\n'
-                graphml += '  </edge>\n'
-        
-        graphml += '</graph>\n'
-        graphml += '</graphml>\n'
-        
-        return graphml
+        return related
+    
+    def _calculate_density(self) -> float:
+        """Calculate graph density"""
+        if len(self.nodes) <= 1:
+            return 0.0
+        max_edges = len(self.nodes) * (len(self.nodes) - 1)
+        return len(self.edges) / max_edges if max_edges > 0 else 0.0
 
 
-def build_entity_graph(osint_results: List[Dict]) -> EntityRelationshipGraph:
-    """Build entity graph from OSINT results"""
+def build_entity_graph(results: List[Dict[str, Any]]) -> EntityRelationshipGraph:
+    """Helper function to build entity graph from results"""
     graph = EntityRelationshipGraph()
-    
-    for result in osint_results:
-        # Create entity for target
-        target_entity = Entity(
-            id=result['target'],
-            name=result['target'],
-            entity_type=result.get('target_type', 'unknown'),
-            data=result.get('data', {}),
-            confidence=result.get('accuracy_score', 0.8),
-            sources=[result.get('module', 'unknown')]
-        )
-        graph.add_entity(target_entity)
-        
-        # Link related entities if found
-        if result.get('found'):
-            data = result.get('data', {})
-            
-            # Link to email if available
-            if 'email' in data and data['email'] != result['target']:
-                email_entity = Entity(
-                    id=data['email'],
-                    name=data['email'],
-                    entity_type='email',
-                    sources=[result.get('module', 'unknown')]
-                )
-                graph.add_entity(email_entity)
-                graph.link_identities(result['target'], data['email'], 0.9)
-            
-            # Link to social profiles
-            if 'profile_url' in data:
-                url = data['profile_url']
-                username = url.split('/')[-1]
-                profile_entity = Entity(
-                    id=url,
-                    name=username,
-                    entity_type='profile',
-                    data={'url': url},
-                    sources=[result.get('module', 'unknown')]
-                )
-                graph.add_entity(profile_entity)
-                graph.link_identities(result['target'], url, 0.95)
-    
-    return graph
+    return graph.build_from_results(results)
